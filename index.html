@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>기니피그 빼빼로</title>
+<title>빼빼로 주세요</title>
+<meta property="og:title" content="빼빼로 주세요">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #fff;
                font-family: Pretendard, "Malgun Gothic", sans-serif; touch-action: none;
@@ -231,7 +232,22 @@ function makeStick(f) {
 
 // ---------- 소리 (코드로 만든 소리) ----------
 let ac = null;
+// 아이폰 무음 스위치가 켜져 있어도 들리게: 소리 없는 <audio>를 틀어 두면 게임 소리가 미디어 소리로 나간다
+let hush = null;
+function silentWav() {
+  const n = 4000, b = new Uint8Array(44 + n).fill(128, 44), v = new DataView(b.buffer);
+  const w = (o, t) => [...t].forEach((c, i) => b[o + i] = c.charCodeAt(0));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, 'data'); v.setUint32(40, n, true);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+addEventListener('visibilitychange', () => { if (hush && document.hidden) hush.pause(); });
 function unlock() {
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  try {
+    if (!hush) { hush = new Audio(silentWav()); hush.loop = true; hush.setAttribute('playsinline', ''); }
+    if (hush.paused) hush.play().catch(() => {});
+  } catch (e) {}
   if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (ac && ac.state !== 'running') ac.resume().catch(() => {});
 }
@@ -443,7 +459,7 @@ if (q.has('demo')) {
   };
   step();
 }
-window.__dbg = () => `${state} pigs=${pigs} ac=${ac && ac.state} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
+window.__dbg = () => `${state} pigs=${pigs} ac=${ac && ac.state} hush=${hush && !hush.paused} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
 renderer.setAnimationLoop(frame);
 </script>
 </body>
