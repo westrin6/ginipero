@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>기니피그 빼빼로</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: linear-gradient(#ffd6d0, #ffecd9 60%);
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #fff;
                font-family: Pretendard, "Malgun Gothic", sans-serif; touch-action: none;
                user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
@@ -13,7 +13,8 @@
           font-size: 26px; letter-spacing: 6px; color: #e8506a; }
   #tray { position: fixed; left: 0; right: 0; bottom: calc(14px + env(safe-area-inset-bottom));
           display: flex; justify-content: center; gap: 8px; padding: 0 10px; }
-  .box { flex: 1; max-width: 72px; aspect-ratio: 5 / 9; }
+  .box { flex: 1; max-width: 72px; aspect-ratio: 5 / 9; transition: transform .15s; }
+  .box.on { transform: translateY(-18px) scale(1.1); }
   .box img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; filter: drop-shadow(0 5px 4px rgba(90, 40, 20, .35)); }
   .hint { position: fixed; left: 0; top: 0; font-size: 36px; pointer-events: none; }
   .heart { position: fixed; font-size: 30px; color: #ff5c7a; pointer-events: none; animation: rise 1.4s ease-out forwards; }
@@ -254,7 +255,7 @@ const sun = new THREE.DirectionalLight('#ffffff', 2.0);
 sun.position.set(2.5, 5, 4); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.radius = 6;
 Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 3, bottom: -3 });
 scene.add(sun);
-const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: '#ffe0bd', roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.ShadowMaterial({ opacity: 0.2, depthWrite: false }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
 let exitX = 3;
@@ -301,17 +302,22 @@ function addCrumbs(color) {
   }
 }
 
-// 손가락 위치 → 기니피그 앞 세로 면 위의 점
-const ray = new THREE.Raycaster(), plane = new THREE.Plane(V(0, 0, 1), -1.45);
+// 손가락 위치 → 기니피그 입 앞, 화면과 나란한 면 위의 점
+const ray = new THREE.Raycaster(), plane = new THREE.Plane(), toCam = V(0, 0, 1);
 function setH(x, y) {
   ray.setFromCamera(new THREE.Vector2(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1), camera);
+  camera.getWorldDirection(toCam).negate();               // 입을 지나고 화면과 나란한 면 → 막대 전체 길이가 보인다
+  plane.setFromNormalAndCoplanarPoint(toCam, MOUTH_LOCAL.clone().addScaledVector(toCam, 0.15));
   ray.ray.intersectPlane(plane, H);
 }
-function startDrag(f, x, y) {
+let activeBox = null;
+const dropBox = () => { if (activeBox) { activeBox.classList.remove('on'); activeBox = null; } };
+function startDrag(f, x, y, el) {
   if (state !== 'idle' || stick) return;
   if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (hint) { hint.remove(); hint = null; try { localStorage.setItem('fed', '1'); } catch (e) {} }
-  flavor = f; stick = makeStick(f); scene.add(stick); dragging = true; setH(x, y);
+  flavor = f; stick = makeStick(f); scene.add(stick); dragging = true; setH(x, y); stick.position.copy(H);
+  if (el) { activeBox = el; el.classList.add('on'); }
 }
 function endDrag() {
   if (!dragging) return;
@@ -319,13 +325,13 @@ function endDrag() {
   const m = mouthWorld(), dist = m.distanceTo(H);
   if (dist - LEN < 0.4) {                                   // 입 가까이에서 놓음 → 먹기
     eat = { t: 0, bite: 0, ins: 0, a0: m.sub(H).normalize() }; state = 'eat';
-  } else { scene.remove(stick); stick = null; }
+  } else { scene.remove(stick); stick = null; dropBox(); }
 }
 const tray = document.getElementById('tray');
 FLAVORS.forEach(f => {
   const b = document.createElement('div'); b.className = 'box';
   b.innerHTML = `<img src="img/box_${f.img}.png" alt="${f.name}" draggable="false">`;
-  b.onpointerdown = e => { e.preventDefault(); startDrag(f, e.clientX, e.clientY); };
+  b.onpointerdown = e => { e.preventDefault(); startDrag(f, e.clientX, e.clientY, b); };
   tray.appendChild(b);
 });
 addEventListener('pointermove', e => { if (dragging) setH(e.clientX, e.clientY); });
@@ -358,7 +364,7 @@ function frame(ms) {
     placeStick(mouthWorld().addScaledVector(a, -(LEN - eat.ins)), a, 0.45);
     openT = 0.2 + 0.45 * Math.abs(Math.sin(eat.t * 23));
     if (eat.t > 7 * 0.27 + 0.25) {
-      scene.remove(stick); stick = null; eat = null; eaten++; drawDots();
+      scene.remove(stick); stick = null; eat = null; eaten++; drawDots(); dropBox();
       if (eaten >= NEED) { state = 'happy'; pig.userData.setHappy(true); hearts(); squeak(3); }
       else { state = 'idle'; squeak(1); }
       st = 0;
