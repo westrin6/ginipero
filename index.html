@@ -18,6 +18,12 @@
   .box img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; filter: drop-shadow(0 5px 4px rgba(90, 40, 20, .35)); }
   .hint { position: fixed; left: 0; top: 0; font-size: 36px; pointer-events: none; }
   .heart { position: fixed; font-size: 30px; color: #ff5c7a; pointer-events: none; animation: rise 1.4s ease-out forwards; }
+  #load { position: fixed; left: 50%; top: 45%; width: 36px; height: 36px; margin: -18px; border-radius: 50%;
+          border: 4px solid #f6d3da; border-top-color: #e8506a; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #again { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); display: none; white-space: nowrap;
+           font: inherit; font-size: 18px; font-weight: 700; color: #fff; background: #e8506a; border: 0;
+           border-radius: 999px; padding: 16px 26px; box-shadow: 0 6px 14px rgba(232, 80, 106, .35); touch-action: manipulation; }
   @keyframes rise { from { transform: translateY(0) scale(.6); opacity: 1; } to { transform: translateY(-150px) scale(1.3); opacity: 0; } }
 </style>
 </head>
@@ -25,6 +31,8 @@
 <canvas id="view"></canvas>
 <div id="dots"></div>
 <div id="tray"></div>
+<div id="load"></div>
+<button id="again">개발자에게 빼빼로 주기</button>
 
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
@@ -223,6 +231,11 @@ function makeStick(f) {
 
 // ---------- 소리 (코드로 만든 소리) ----------
 let ac = null;
+function unlock() {
+  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (ac && ac.state !== 'running') ac.resume().catch(() => {});
+}
+['pointerdown', 'pointerup', 'touchend', 'click'].forEach(n => addEventListener(n, unlock, true));
 function crunch() {
   if (!ac) return;
   const n = ac.sampleRate * 0.08, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
@@ -262,7 +275,7 @@ let exitX = 3;
 function resize() {
   const w = innerWidth, h = innerHeight, t = Math.tan(FOV * Math.PI / 360);
   renderer.setSize(w, h, false); camera.aspect = w / h;
-  const d = Math.max(4, 5.0 / (2 * t * camera.aspect));      // 기니피그가 화면 너비에 맞게
+  const d = Math.max(4, 3.75 / (2 * t * camera.aspect));      // 기니피그가 화면 너비에 맞게
   camera.position.set(0, 0.55 + d * 0.13, d); camera.lookAt(0, 0.42, 0);
   camera.updateProjectionMatrix();
   exitX = d * t * camera.aspect + 1.2;
@@ -270,7 +283,8 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 // ---------- 게임 상태 ----------
-let pig, patIndex = -1, state = 'idle', st = 0, eaten = 0, open = 0;
+let pig, patIndex = -1, state = 'idle', st = 0, eaten = 0, open = 0, pigs = 0;
+const PIGS = 3;                                          // 이만큼 먹이면 끝 버튼
 let stick = null, flavor = null, dragging = false, eat = null;
 const H = V(0, 0, 0), crumbs = [];
 const MOUTH_LOCAL = V(0, MOUTH.y - 0.03, MOUTH.z + 0.01), UPY = V(0, 1, 0);
@@ -283,6 +297,9 @@ function newPig() {
   if (pig) scene.remove(pig);
   pig = makePig(PATTERNS[i]); scene.add(pig);
 }
+function enter() { newPig(); pig.position.x = -exitX; pig.rotation.y = Math.PI / 2; state = 'walkIn'; st = 0; }
+const again = document.getElementById('again');
+again.onclick = () => { again.style.display = 'none'; pigs = 0; enter(); };   // 다시 시작
 const dotsEl = document.getElementById('dots');
 const drawDots = () => dotsEl.textContent = '♥'.repeat(eaten) + '♡'.repeat(NEED - eaten);
 
@@ -314,7 +331,6 @@ let activeBox = null;
 const dropBox = () => { if (activeBox) { activeBox.classList.remove('on'); activeBox = null; } };
 function startDrag(f, x, y, el) {
   if (state !== 'idle' || stick) return;
-  if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (hint) { hint.remove(); hint = null; try { localStorage.setItem('fed', '1'); } catch (e) {} }
   flavor = f; stick = makeStick(f); scene.add(stick); dragging = true; setH(x, y); stick.position.copy(H);
   if (el) { activeBox = el; el.classList.add('on'); }
@@ -378,7 +394,9 @@ function frame(ms) {
   } else if (state === 'walkOut' || state === 'walkIn') {
     pig.position.x += 1.7 * dt; hop = Math.abs(Math.sin(st * 11)) * 0.035; pig.rotation.z = Math.sin(st * 11) * 0.05;
     if (state === 'walkOut' && pig.position.x > exitX) {
-      newPig(); pig.position.x = -exitX; pig.rotation.y = Math.PI / 2; eaten = 0; drawDots(); state = 'walkIn'; st = 0;
+      pigs++; eaten = 0; drawDots();
+      if (pigs >= PIGS) { pig.visible = false; state = 'end'; again.style.display = 'block'; }
+      else enter();
     } else if (state === 'walkIn' && pig.position.x >= 0) {
       pig.position.x = 0; pig.rotation.z = 0; state = 'turnIn'; st = 0;
     }
@@ -401,6 +419,8 @@ function frame(ms) {
 }
 
 newPig(); drawDots();
+document.getElementById('load').remove();
+if (q.has('pigs')) pigs = +q.get('pigs');   // 시험용
 // 처음 한 번: 손가락이 상자에서 입까지 움직이며 방법을 보여 준다
 let hint = null, seen = false;
 try { seen = !!localStorage.getItem('fed'); } catch (e) {}
@@ -423,7 +443,7 @@ if (q.has('demo')) {
   };
   step();
 }
-window.__dbg = () => `${state} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
+window.__dbg = () => `${state} pigs=${pigs} ac=${ac && ac.state} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
 renderer.setAnimationLoop(frame);
 </script>
 </body>
