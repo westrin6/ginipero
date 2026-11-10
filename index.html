@@ -253,10 +253,24 @@ function unlock() {
   } catch (e) {}
   if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (ac && ac.state !== 'running') ac.resume().catch(() => {});
+  prep();
 }
 ['pointerdown', 'pointerup', 'touchend', 'click'].forEach(n => addEventListener(n, unlock, true));
+// 바삭 소리: img/crunch.wav = 0.1초 칸 5개. 출처 "crunch" · "crunch 2" by Gravity Sound (CC BY 4.0, Wikimedia Commons)에서 잘라 씀
+let snapData = null, snaps = null;
+fetch('img/crunch.wav').then(r => r.arrayBuffer()).then(b => { snapData = b; prep(); }).catch(() => {});
+function prep() { if (ac && !snaps && snapData) { const d = snapData; snapData = null; ac.decodeAudioData(d, b => { snaps = b; }, () => {}); } }
 function crunch() {
   if (!ac) return;
+  if (snaps) {                                              // 앞니로 '오' '독' 두 번
+    const i = Math.floor(Math.random() * 5), j = (i + 1 + Math.floor(Math.random() * 4)) % 5;
+    [[i, 0, 0.92], [j, 0.085, 1.12]].forEach(([k, at, rate]) => {
+      const src = ac.createBufferSource(), gain = ac.createGain();
+      src.buffer = snaps; src.playbackRate.value = rate * (0.95 + Math.random() * 0.1); gain.gain.value = 0.9;
+      src.connect(gain).connect(ac.destination); src.start(ac.currentTime + at, k * 0.1, 0.1);
+    });
+    return;
+  }
   const n = ac.sampleRate * 0.08, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
   for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 2;
   const src = ac.createBufferSource(), hp = ac.createBiquadFilter(), gain = ac.createGain();
@@ -346,13 +360,11 @@ function setH(x, y) {
   plane.setFromNormalAndCoplanarPoint(toCam, MOUTH_LOCAL.clone().addScaledVector(toCam, 0.15));
   ray.ray.intersectPlane(plane, H);
 }
-let activeBox = null;
-const dropBox = () => { if (activeBox) { activeBox.classList.remove('on'); activeBox = null; } };
-function startDrag(f, x, y, el) {
+let selBox = null, tap = null;                              // 고른 상자, 누르는 중인 상자
+function startDrag(f, x, y) {
   if (state !== 'idle' || stick) return;
   if (hint) { hint.remove(); hint = null; try { localStorage.setItem('fed', '1'); } catch (e) {} }
   flavor = f; stick = makeStick(f); scene.add(stick); dragging = true; setH(x, y); stick.position.copy(H);
-  if (el) { activeBox = el; el.classList.add('on'); }
 }
 function endDrag() {
   if (!dragging) return;
@@ -360,18 +372,28 @@ function endDrag() {
   const m = mouthWorld(), dist = m.distanceTo(H);
   if (dist - LEN < 0.4) {                                   // 입 가까이에서 놓음 → 먹기
     eat = { t: 0, bite: 0, ins: 0, a0: m.sub(H).normalize() }; state = 'eat';
-  } else { scene.remove(stick); stick = null; dropBox(); }
+  } else { scene.remove(stick); stick = null; }
 }
 const tray = document.getElementById('tray');
 FLAVORS.forEach(f => {
   const b = document.createElement('div'); b.className = 'box';
   b.innerHTML = `<img src="img/box_${f.img}.png" alt="${f.name}" draggable="false">`;
-  b.onpointerdown = e => { e.preventDefault(); startDrag(f, e.clientX, e.clientY, b); };
+  b.onpointerdown = e => {
+    e.preventDefault();
+    if (b === selBox) startDrag(f, e.clientX, e.clientY);   // 고른 상자만 끌 수 있다
+    else tap = { b, x: e.clientX, y: e.clientY };
+  };
   tray.appendChild(b);
 });
 addEventListener('pointermove', e => { if (dragging) setH(e.clientX, e.clientY); });
-addEventListener('pointerup', endDrag);
-addEventListener('pointercancel', endDrag);
+addEventListener('pointerup', e => {
+  if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 12) {   // 톡 누름 → 고르기
+    if (selBox) selBox.classList.remove('on');
+    selBox = tap.b; selBox.classList.add('on');
+  }
+  tap = null; endDrag();
+});
+addEventListener('pointercancel', () => { tap = null; endDrag(); });
 addEventListener('contextmenu', e => e.preventDefault());
 
 // ---------- 매 프레임 ----------
@@ -399,7 +421,7 @@ function frame(ms) {
     placeStick(mouthWorld().addScaledVector(a, -(LEN - eat.ins)), a, 0.45);
     openT = 0.2 + 0.45 * Math.abs(Math.sin(eat.t * 23));
     if (eat.t > 7 * 0.27 + 0.25) {
-      scene.remove(stick); stick = null; eat = null; eaten++; drawDots(); dropBox();
+      scene.remove(stick); stick = null; eat = null; eaten++; drawDots();
       if (eaten >= NEED) { state = 'happy'; pig.userData.setHappy(true); hearts(); squeak(3); }
       else { state = 'idle'; squeak(1); }
       st = 0;
@@ -448,8 +470,10 @@ if (!seen && !q.has('demo')) {
   const r = tray.children[0].getBoundingClientRect(), m = mouthWorld().project(camera);
   const from = `translate(${r.left + r.width / 2 - 16}px, ${r.top + 8}px)`;
   const to = `translate(${(m.x + 1) / 2 * innerWidth - 16}px, ${(1 - m.y) / 2 * innerHeight + 6}px)`;
-  hint.animate([{ transform: from, opacity: 0 }, { transform: from, opacity: 1, offset: 0.15 }, { transform: to, opacity: 1, offset: 0.8 }, { transform: to, opacity: 0 }],
-    { duration: 2200, iterations: Infinity });
+  hint.animate([{ transform: from, opacity: 0 }, { transform: from, opacity: 1, offset: 0.1 },
+    { transform: from + ' scale(.75)', opacity: 1, offset: 0.18 }, { transform: from, opacity: 1, offset: 0.26 },
+    { transform: from, opacity: 1, offset: 0.42 }, { transform: to, opacity: 1, offset: 0.85 }, { transform: to, opacity: 0 }],
+    { duration: 3000, iterations: Infinity });
 }
 if (q.has('eaten')) { eaten = +q.get('eaten'); drawDots(); }
 // 시험용: ?demo=맛 번호 → 스스로 끌어다 먹인다
@@ -462,7 +486,7 @@ if (q.has('demo')) {
   };
   step();
 }
-window.__dbg = () => `${state} pigs=${pigs} ac=${ac && ac.state} hush=${hush && !hush.paused} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
+window.__dbg = () => `${state} pigs=${pigs} snd=${!!snaps} sel=${selBox ? [...tray.children].indexOf(selBox) : -1} ac=${ac && ac.state} hush=${hush && !hush.paused} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
 renderer.setAnimationLoop(frame);
 </script>
 </body>
