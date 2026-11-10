@@ -268,13 +268,15 @@ function unlock() {
 let snapData = null, snaps = null;
 fetch('img/odok.wav').then(r => r.arrayBuffer()).then(b => { snapData = b; prep(); }).catch(() => {});
 function prep() { if (ac && !snaps && snapData) { const d = snapData; snapData = null; ac.decodeAudioData(d, b => { snaps = b; }, () => {}); } }
-function crunch(hi) {                                       // hi = 0 '오', 1 '독'
+function crunch(hi, count = 1) {                            // hi = 0 '오', 1 '독'. count = 먹고 있는 막대 수
   window.__snd = (window.__snd || 0) + 1;                   // 시험용
   if (!ac) return;
-  if (snaps) {                                              // 입을 다물 때마다 한 번
-    const src = ac.createBufferSource(), gain = ac.createGain(), k = Math.floor(Math.random() * 5);
-    src.buffer = snaps; src.playbackRate.value = (hi ? 1.12 : 0.92) * (0.96 + Math.random() * 0.08); gain.gain.value = 0.55;
-    src.connect(gain).connect(ac.destination); src.start(ac.currentTime, k * 0.07, 0.07);
+  if (snaps) {                                              // 입을 다물 때마다, 막대 수만큼 겹쳐서
+    for (let i = 0; i < count; i++) {
+      const src = ac.createBufferSource(), gain = ac.createGain(), k = Math.floor(Math.random() * 5);
+      src.buffer = snaps; src.playbackRate.value = (hi ? 1.12 : 0.92) * (0.94 + Math.random() * 0.12); gain.gain.value = 0.55;
+      src.connect(gain).connect(ac.destination); src.start(ac.currentTime + i * 0.032 + (i ? Math.random() * 0.012 : 0), k * 0.07, 0.07);
+    }
     return;
   }
   const n = ac.sampleRate * 0.08, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
@@ -290,6 +292,23 @@ function puff() {                                           // 퉤
   for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 3;
   const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), gain = ac.createGain();
   src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.8; gain.gain.value = 0.9;
+  src.connect(bp).connect(gain).connect(ac.destination); src.start();
+}
+function tock() {                                           // 빼빼로가 바닥에 떨어지는 작은 소리 (톡, 또 한 번 작게)
+  if (!ac || !snaps) return;
+  [[0, 0.3], [0.1, 0.13]].forEach(([at, vol]) => {
+    const src = ac.createBufferSource(), gain = ac.createGain();
+    src.buffer = snaps; src.playbackRate.value = 1.7 + Math.random() * 0.5; gain.gain.value = vol;
+    src.connect(gain).connect(ac.destination); src.start(ac.currentTime + at, Math.floor(Math.random() * 5) * 0.07, 0.03);
+  });
+}
+function hmph() {                                           // 흥, 삐진 콧숨 (작게)
+  if (!ac) return;
+  const n = ac.sampleRate * 0.3, buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.min(1, i / (n * 0.08)) * (1 - i / n) ** 1.6;
+  const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), gain = ac.createGain(), t = ac.currentTime;
+  src.buffer = buf; bp.type = 'bandpass'; bp.Q.value = 1.6; gain.gain.value = 0.3;
+  bp.frequency.setValueAtTime(2000, t); bp.frequency.exponentialRampToValueAtTime(750, t + 0.28);
   src.connect(bp).connect(gain).connect(ac.destination); src.start();
 }
 function squeak(times) {
@@ -334,7 +353,7 @@ let pig, patIndex = -1, state = 'idle', st = 0, eaten = 0, open = 0, pigs = 0;
 const PIGS = 3;                                          // 이만큼 먹이면 끝 버튼
 let stick = null, flavor = null, dragging = false;
 const eats = [], fly = [], drops = [];                    // 먹는 중인 막대, 뱉어져 날아가는 막대, 땀방울
-let chewT = 0, chewN = 0, shock = 0, jolt = 0, sweatT = 0, spat = false;
+let chewT = 0, chewN = 0, shock = 0, jolt = 0, sweatT = 0, spat = false, huffed = false;
 const H = V(0, 0, 0), crumbs = [];
 const MOUTH_LOCAL = V(0, MOUTH.y - 0.03, MOUTH.z + 0.01), UPY = V(0, 1, 0);
 const mouthWorld = () => pig.localToWorld(MOUTH_LOCAL.clone());
@@ -378,6 +397,8 @@ function setH(x, y) {
   ray.ray.intersectPlane(plane, H);
 }
 let selBox = null, tap = null;                              // 고른 상자, 누르는 중인 상자
+const unselect = () => { if (selBox) { selBox.classList.remove('on'); selBox = null; } };
+addEventListener('visibilitychange', () => { if (document.hidden) unselect(); });   // 다녀오면 다시 고르게
 function startDrag(f, x, y) {
   if (state !== 'idle' || stick || eaten + eats.length >= NEED) return;
   if (hint) { hint.remove(); hint = null; try { localStorage.setItem('fed', '1'); } catch (e) {} }
@@ -390,7 +411,7 @@ function endDrag() {
   if (dist - LEN >= 0.4) { scene.remove(stick); stick = null; return; }
   if (eats.length >= 3) {                                   // 4개째 → 짜증 내며 뱉는다
     eats.forEach(e => fly.push(e.stick)); eats.length = 0; fly.push(stick); stick = null;
-    state = 'spit'; st = 0; spat = false; shock = 0; pig.userData.setAngry(true);
+    state = 'spit'; st = 0; spat = false; huffed = false; shock = 0; pig.userData.setAngry(true);
     return;
   }
   if (eats.length) { shock = Math.min(0.75, shock + 0.25); jolt = 1; }   // 먹는 중에 또 주면 놀란다
@@ -405,6 +426,7 @@ FLAVORS.forEach(f => {
   b.innerHTML = `<img src="img/box_${f.img}.png" alt="${f.name}" draggable="false">`;
   b.onpointerdown = e => {
     e.preventDefault();
+    if (b === selBox && ac && ac.state !== 'running') unselect();   // 소리가 잠겼으면 다시 톡 눌러 고르게 한다
     if (b === selBox) startDrag(f, e.clientX, e.clientY);   // 고른 상자만 끌 수 있다
     else tap = { b, x: e.clientX, y: e.clientY };
   };
@@ -444,7 +466,7 @@ function frame(ms) {
       // 입을 다무는 순간마다 소리 한 번. 두 번('오' '독') 씹을 때마다 한 입 줄어든다
       chewT += dt;
       const ch = Math.floor((chewT - CHEW / 2) / CHEW) + 1, chomp = ch > chewN;
-      if (chomp) { chewN = ch; if (eats.some(e => e.n < 14)) crunch((ch - 1) % 2); }
+      if (chomp) { chewN = ch; const cnt = eats.filter(e => e.n < 14).length; if (cnt) crunch((ch - 1) % 2, cnt); }
       openT = Math.max(openT, 0.12 + 0.55 * Math.abs(Math.cos(Math.PI * chewT / CHEW)));
       for (let i = eats.length - 1; i >= 0; i--) {
         const e = eats[i]; e.t += dt;
@@ -468,6 +490,7 @@ function frame(ms) {
     }
     openT = st > 0.4 && st < 0.7 ? 0.6 : 0;
     if (st > 0.75 && st < 1.9) yawT = 0.45;
+    if (st > 0.9 && !huffed) { huffed = true; hmph(); }
     if (st > 2.3) { pig.userData.setAngry(false); state = 'idle'; st = 0; }
   } else if (state === 'happy') {
     hop = Math.abs(Math.sin(st * 7)) * 0.13; openT = 0.3;
@@ -514,6 +537,7 @@ function frame(ms) {
   for (let i = fly.length - 1; i >= 0; i--) {              // 뱉어진 막대
     const f = fly[i], v = f.userData.v; if (!v) continue;
     v.y -= 7 * dt; f.position.addScaledVector(v, dt); f.rotation.x += 9 * dt; f.rotation.z += 5 * dt;
+    if (f.position.y < 0.03 && !f.userData.hit) { f.userData.hit = true; tock(); }
     if (f.position.y < -1.5) { scene.remove(f); fly.splice(i, 1); }
   }
 
@@ -551,6 +575,7 @@ if (q.has('demo')) {
   };
   step();
 }
+window.__lock = () => ac && ac.suspend();   // 시험용: 소리 잠그기
 window.__dbg = () => `${state} eats=${eats.length} shock=${shock.toFixed(2)} fly=${fly.length} drops=${drops.length} t=${eats.length ? chewT.toFixed(3) : -1} n=${window.__snd || 0} pigs=${pigs} snd=${!!snaps} sel=${selBox ? [...tray.children].indexOf(selBox) : -1} ac=${ac && ac.state} hush=${hush && !hush.paused} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
 renderer.setAnimationLoop(frame);
 </script>
