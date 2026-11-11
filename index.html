@@ -15,6 +15,8 @@
   #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
   #dots { position: fixed; top: calc(14px + env(safe-area-inset-top)); left: 0; right: 0; text-align: center;
           font-size: 26px; letter-spacing: 6px; color: #e8506a; }
+  #gauge { width: 120px; height: 10px; margin: 6px auto 0; border-radius: 5px; background: #f6dde2; overflow: hidden; }
+  #fill { width: 0; height: 100%; border-radius: 5px; background: #ff7a93; transition: width .25s; }
   #tray { position: fixed; left: 0; right: 0; bottom: calc(14px + env(safe-area-inset-bottom));
           display: flex; justify-content: center; gap: 8px; padding: 0 10px; }
   .box { flex: 1; max-width: 72px; aspect-ratio: 5 / 9; transition: transform .15s; }
@@ -36,7 +38,7 @@
 </head>
 <body>
 <canvas id="view"></canvas>
-<div id="dots"></div>
+<div id="dots"><span id="won"></span><div id="gauge"><div id="fill"></div></div></div>
 <div id="tray"></div>
 <div id="load"></div>
 <div id="end"><a id="gift" href="https://kko.to/sGcnWSosfU" target="_blank" rel="noopener">개발자에게 빼빼로 주기</a><button id="again">다시 먹이러 가기</button></div>
@@ -368,9 +370,13 @@ function newPig() {
 function enter() { newPig(); pig.position.x = -exitX; pig.rotation.y = Math.PI / 2; state = 'walkIn'; st = 0; }
 const again = document.getElementById('again');
 const endEl = document.getElementById('end');
-again.onclick = () => { endEl.style.display = 'none'; pigs = 0; enter(); };   // 다시 시작
-const dotsEl = document.getElementById('dots');
-const drawDots = () => dotsEl.textContent = '♥'.repeat(eaten) + '♡'.repeat(NEED - eaten);
+again.onclick = () => { endEl.style.display = 'none'; pigs = 0; won = 0; drawDots(); enter(); };   // 다시 시작
+let won = 0;                                                // 찬 하트 수 (다 먹인 기니피그 수)
+const wonEl = document.getElementById('won'), fillEl = document.getElementById('fill');
+const drawDots = () => {                                    // 위 하트 3개 + 그 아래 게이지(빼빼로 5개로 가득)
+  wonEl.textContent = '♥'.repeat(won) + '♡'.repeat(PIGS - won);
+  fillEl.style.width = eaten / NEED * 100 + '%';
+};
 
 function hearts() {
   for (let i = 0; i < 9; i++) setTimeout(() => {
@@ -477,7 +483,7 @@ function frame(ms) {
         if (e.n >= 14 && (e.end += dt) > 0.25) {
           scene.remove(e.stick); eats.splice(i, 1); eaten++; drawDots();
           if (!eats.length) {
-            if (eaten >= NEED) { state = 'happy'; pig.userData.setHappy(true); hearts(); squeak(3); } else squeak(1);
+            if (eaten >= NEED) { state = 'happy'; pig.userData.setHappy(true); hearts(); squeak(3); won++; drawDots(); } else squeak(1);
             st = 0;
           }
         }
@@ -485,7 +491,7 @@ function frame(ms) {
     }
   } else if (state === 'spit') {                            // 짜증 → 퉤 → 도도하게 고개 돌림 → 원래대로
     if (st > 0.45 && !spat) {
-      spat = true; puff(); eaten = 0; drawDots();           // 하트도 처음부터
+      spat = true; puff(); eaten = 0; drawDots();           // 게이지만 처음부터 (하트는 그대로)
       fly.forEach(f => { f.userData.v = V((Math.random() - 0.5) * 2.4, 1.2 + Math.random(), 2.4 + Math.random()); });
     }
     openT = st > 0.4 && st < 0.7 ? 0.6 : 0;
@@ -550,7 +556,7 @@ function frame(ms) {
 
 newPig(); drawDots();
 document.getElementById('load').remove();
-if (q.has('pigs')) pigs = +q.get('pigs');   // 시험용
+if (q.has('pigs')) { pigs = won = +q.get('pigs'); drawDots(); }   // 시험용
 // 처음 한 번: 손가락이 상자에서 입까지 움직이며 방법을 보여 준다
 let hint = null, seen = false;
 try { seen = !!localStorage.getItem('fed'); } catch (e) {}
@@ -576,7 +582,7 @@ if (q.has('demo')) {
   step();
 }
 window.__lock = () => ac && ac.suspend();   // 시험용: 소리 잠그기
-window.__dbg = () => `${state} eats=${eats.length} shock=${shock.toFixed(2)} fly=${fly.length} drops=${drops.length} t=${eats.length ? chewT.toFixed(3) : -1} n=${window.__snd || 0} pigs=${pigs} snd=${!!snaps} sel=${selBox ? [...tray.children].indexOf(selBox) : -1} ac=${ac && ac.state} hush=${hush && !hush.paused} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
+window.__dbg = () => `${state} eats=${eats.length} shock=${shock.toFixed(2)} fly=${fly.length} drops=${drops.length} t=${eats.length ? chewT.toFixed(3) : -1} n=${window.__snd || 0} pigs=${pigs} won=${won} fill=${fillEl.style.width} snd=${!!snaps} sel=${selBox ? [...tray.children].indexOf(selBox) : -1} ac=${ac && ac.state} hush=${hush && !hush.paused} eaten=${eaten} x=${pig.position.x.toFixed(2)} open=${open.toFixed(2)} stick=${!!stick}`;   // 시험용
 renderer.setAnimationLoop(frame);
 </script>
 </body>
